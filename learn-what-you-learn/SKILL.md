@@ -84,6 +84,8 @@ Everything is saved to Notion automatically.
 
 - **Ask anything** → I'll answer (and save it)
 - **`note: your thought`** → saves your idea
+- **`edit: keyword → new content`** → modifies a saved entry
+- **`delete: keyword`** → removes a saved entry
 - **`done`** → ends the session
 ---
 ```
@@ -118,6 +120,26 @@ Extract the text after `note:` and save it as an Idea:
 Append: `- [Idea] <their thought>`
 
 Reply: "Saved ✓"
+
+### `edit: <keyword> → <new content>`
+The user wants to modify a previously saved entry.
+
+1. Use `notion-fetch` to read the current page content.
+2. Find the bullet line containing `<keyword>`. If multiple lines match, list them with numbers and ask the user to pick one.
+3. Replace the matched line using `notion-update-page` with `update_content`:
+   - `old_str`: the full matched bullet line
+   - `new_str`: the same line with its content replaced by `<new content>` (keep the original label like `[Q&A]`, `[Idea]`, `[Summary]`)
+4. Reply: "Updated ✓"
+
+### `delete: <keyword>`
+The user wants to remove a previously saved entry.
+
+1. Use `notion-fetch` to read the current page content.
+2. Find the bullet line containing `<keyword>`. If multiple lines match, list them with numbers and ask the user to pick one.
+3. Remove the matched line using `notion-update-page` with `update_content`:
+   - `old_str`: the full matched bullet line (including the leading `\n` if not the first bullet)
+   - `new_str`: `""` (empty string)
+4. Reply: "Deleted ✓"
 
 ### `done`
 Give a short warm closing summary of what was discussed and what was saved to Notion. End with encouragement.
