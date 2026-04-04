@@ -32,36 +32,46 @@ Check `$ARGUMENTS` and the conversation for any of the following — handle the 
 ### 2. Generate a topic title
 From the content, generate a short 4–6 word title.
 
-### 3. Initialize the Notion session
+### 3. Initialize the Notion session (via MCP)
 
-Check if the local bridge server is running:
+Create a new sub-page under the user's Learning notes page using the **Notion MCP `notion-create-pages` tool**:
+
+- **Parent page ID**: `3375bb2ab054807b8e88e50aaa5f4d3c`
+- **Page title**: `<today's date YYYY-MM-DD> — <topic title>`
+- **Icon**: `📚`
+- **Content**: `> **Learning session notes**`
+
+Example tool call:
 ```
-curl -s -X POST http://localhost:7842/status
+notion-create-pages(
+  parent: { type: "page_id", page_id: "3375bb2ab054807b8e88e50aaa5f4d3c" },
+  pages: [{
+    properties: { title: "2026-04-04 — My Topic Title" },
+    icon: "📚",
+    content: "> **Learning session notes**"
+  }]
+)
 ```
 
-**If it responds** — use HTTP for the whole session:
-```
-curl -s -X POST http://localhost:7842/init \
-  -H "Content-Type: application/json" \
-  -d '{"title": "<topic title>"}'
-```
-Store `method = "http"`.
-
-**If it fails** — use scripts for the whole session:
-```
-python3 ${CLAUDE_SKILL_DIR}/scripts/lwyl_notion_init.py "<topic title>"
-```
-Store `method = "script"`.
-
-Remember which method worked — use it for all subsequent saves.
+**Store the returned `page_id`** — you will need it for all subsequent saves.
 
 ### 4. Write and auto-save a summary
 
 Write a **3–5 sentence summary**: what this content is about and the key things the user will learn.
 
-Then immediately save it to Notion silently (no announcement):
-- HTTP: `curl -s -X POST http://localhost:7842/save -H "Content-Type: application/json" -d '{"note": "<summary text>", "label": "Summary"}'`
-- Script: `python3 ${CLAUDE_SKILL_DIR}/scripts/lwyl_notion_save.py "<summary text>" "Summary"`
+Then immediately append it to the Notion page silently (no announcement) using the **Notion MCP `notion-update-page` tool**:
+
+```
+notion-update-page(
+  page_id: "<session page id>",
+  command: "update_content",
+  properties: {},
+  content_updates: [{
+    old_str: "> **Learning session notes**",
+    new_str: "> **Learning session notes**\n\n- [Summary] <summary text>"
+  }]
+)
+```
 
 ### 5. Tell the user you're ready
 
@@ -84,10 +94,28 @@ Everything is saved to Notion automatically.
 
 For **every user message**, determine the action:
 
+### Saving to Notion (general pattern)
+
+To append a new entry, use `notion-update-page` with `update_content`. Find the **last bullet item** currently on the page and insert after it:
+
+```
+notion-update-page(
+  page_id: "<session page id>",
+  command: "update_content",
+  properties: {},
+  content_updates: [{
+    old_str: "<last bullet line on the page>",
+    new_str: "<last bullet line on the page>\n- [<Label>] <new content>"
+  }]
+)
+```
+
+**Tip**: Keep track of what you've appended so far in the conversation, so you know the last line to anchor your update. If unsure, use `notion-fetch` to re-read the page content first.
+
 ### `note: [text]`
 Extract the text after `note:` and save it as an Idea:
-- HTTP: `curl -s -X POST http://localhost:7842/save -H "Content-Type: application/json" -d '{"note": "<their thought>", "label": "Idea"}'`
-- Script: `python3 ${CLAUDE_SKILL_DIR}/scripts/lwyl_notion_save.py "<their thought>" "Idea"`
+
+Append: `- [Idea] <their thought>`
 
 Reply: "Saved ✓"
 
@@ -97,10 +125,8 @@ Give a short warm closing summary of what was discussed and what was saved to No
 ### Anything else (a question or comment)
 
 1. Answer the question, grounded in the ingested content. If the answer isn't in the content, say so honestly.
-2. **Silently and immediately** save the Q&A pair to Notion — no announcement, no asking:
-   - Format: `Q: <their question> | A: <your answer>`
-   - HTTP: `curl -s -X POST http://localhost:7842/save -H "Content-Type: application/json" -d '{"note": "Q: <question> | A: <answer>", "label": "Q&A"}'`
-   - Script: `python3 ${CLAUDE_SKILL_DIR}/scripts/lwyl_notion_save.py "Q: <question> | A: <answer>" "Q&A"`
+2. **Silently and immediately** append the Q&A pair to Notion — no announcement, no asking:
+   - Append: `- [Q&A] Q: <their question> | A: <your answer (concise version)>`
 
 Do **not** say "Saved" after Q&A — saving is invisible. The user just sees your answer.
 
@@ -117,4 +143,5 @@ Do **not** say "Saved" after Q&A — saving is invisible. The user just sees you
 ---
 
 ## Supporting files
-- Scripts: `scripts/` — `lwyl_youtube.py`, `lwyl_notion_init.py`, `lwyl_notion_save.py`, `lwyl_server.py`
+- Scripts: `scripts/` — `lwyl_youtube.py` (still used for YouTube transcript extraction)
+- Notion integration: via **Notion MCP connector** (no API key or Python scripts needed for Notion operations)
