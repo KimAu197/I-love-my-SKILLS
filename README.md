@@ -31,6 +31,26 @@ No manual saving. No copy-pasting. Just learn.
 **Setup:** Requires `NOTION_API_KEY` and `NOTION_LEARNING_PAGE_ID` env vars.
 See [`learn-what-you-learn/README.md`](./learn-what-you-learn/README.md) for full setup instructions.
 
+### 🎯 [task-clarification](./task-clarification/)
+
+> Transform vague intent into execution-ready plans before any implementation begins.
+
+Point it at any under-specified request and it will:
+- Restate the goal as a precise objective
+- Surface gaps, missing context, and hidden assumptions
+- Produce a structured execution spec and a final prompt a downstream agent can run directly
+
+Scales verbosity to uncertainty — compact output for clear tasks, full breakdown for ambiguous ones.
+
+**Use when:** A request is broad, partially described, or needs a clean handoff to another agent.
+**Skip when:** The task is already precise or clarification overhead isn't worth it.
+
+```bash
+/task-clarification "help me build an agent for this workflow"
+/task-clarification "fix this code"
+/task-clarification "I want a better prompt for this task"
+```
+
 ---
 
 ## How to install a skill
