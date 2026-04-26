@@ -51,6 +51,27 @@ Scales verbosity to uncertainty — compact output for clear tasks, full breakdo
 /task-clarification "I want a better prompt for this task"
 ```
 
+### [domino](./domino/)
+
+> End-to-end Cursor workflow orchestration from one skill entry point.
+
+Domino turns a large task into a managed workflow inside Cursor. It can plan tasks, dispatch subagents, continue through hooks, verify results, and persist lightweight project memory.
+
+It installs:
+- The Cursor skill at `~/.cursor/skills/domino`
+- Helper scripts under `~/.cursor/skills/domino/scripts`
+- Hook scripts under `~/.cursor/hooks`
+- Hook entries in `~/.cursor/hooks.json`
+
+```bash
+cd domino
+./sync.sh
+```
+
+After syncing, restart or reload Cursor so the skill and hooks are available.
+
+Use it by asking Cursor to use the `domino` skill for a multi-step task. Domino manages the old slash-command chain internally; users should not need to manually run `/orchestrator`, `/agent-executor`, `/verify`, or related legacy commands.
+
 ---
 
 ## How to install a skill
@@ -62,6 +83,51 @@ claude skill install ./learn-what-you-learn
 
 **Claude Desktop / Claude.ai:**
 Download the `.skill` file from [Releases](../../releases) and drag it into your skills panel.
+
+**Cursor Domino:**
+```bash
+git clone https://github.com/KimAu197/I-love-my-SKILLS.git
+cd I-love-my-SKILLS/domino
+./sync.sh
+```
+
+The sync script is safe to rerun. It overwrites the local Domino skill files and hook scripts, then merges Domino hook entries into `~/.cursor/hooks.json` while preserving unrelated hook configuration.
+
+To verify the install:
+```bash
+ls ~/.cursor/skills/domino
+ls ~/.cursor/hooks
+```
+
+You should see `SKILL.md`, `reference.md`, `examples.md`, `scripts/domino_runtime.py`, `domino-stop.py`, and `domino-subagent-stop.py`.
+
+---
+
+## Updating and contributing
+
+If you test Domino on another machine and find an issue, update the source files in this repository, rerun `./sync.sh`, test again, then push the fix back to GitHub.
+
+Typical workflow:
+
+```bash
+git pull
+cd domino
+./sync.sh
+
+# edit files under domino/
+./sync.sh
+# test in Cursor
+
+cd ..
+git status
+git add domino README.md
+git commit -m "fix: Improve Domino workflow behavior"
+git push
+```
+
+If you cloned the repo with write access, `git push` updates the original repository directly. If you do not have write access, fork the repo and open a pull request.
+
+Domino may create runtime files such as `.cursor/domino-plan.md`, `.cursor/domino-runtime.json`, `.cursor/tasks/task-*.md`, `.cursor/project_state.md`, and `.cursor/context_summary.md` inside the workspace being tested. Treat those as task runtime state, not skill source code, unless you intentionally want to save an example.
 
 ---
 
