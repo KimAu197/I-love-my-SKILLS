@@ -1,7 +1,7 @@
 ---
 name: learn-what-you-learn
-description: Zero-friction learning companion. Triggers when the user wants to learn from, study, or understand any content — a URL, YouTube link, PDF, local file, HTML, or pasted text. Auto-ingests the content, gives a summary, and silently saves everything (summary + every Q&A) to Notion with no copy-paste required. Use this skill whenever the user says "learn", "study", "explain this", "summarize this", or drops a file/link they want to understand deeply.
-argument-hint: [url | youtube link | file path | text]
+description: Zero-friction learning companion. Triggers when the user wants to learn from, study, or understand any content — a URL, YouTube link, PDF, local file, HTML, or pasted text; or wants current topics/trends without a link (uses web search). Auto-ingests the content (or synthesized web findings), gives a summary, and silently saves everything (summary + every Q&A) to Notion with no copy-paste required. Use this skill whenever the user says "learn", "study", "explain this", "summarize this", drops a file/link, or asks for latest news or hot topics in a domain.
+argument-hint: [url | youtube link | file path | text | topic-only query]
 disable-model-invocation: true
 ---
 
@@ -25,12 +25,14 @@ Check `$ARGUMENTS` and the conversation for any of the following — handle the 
 | Local file | any file path or uploaded file | Read tool on the path |
 | HTML file | ends in `.html` or `.htm` | Read tool on the path |
 | Uploaded file in chat | user dragged/dropped a file | Read the file directly from the upload |
-| No argument / plain text | anything else | use the text directly, or ask the user to paste now |
+| Topic-only / recency query | no URL/file; user wants **today's trends**, **latest papers**, **行业/领域热点**, or "帮我看看最近XXX" without a source | Use the **WebSearch** tool (and **WebFetch** on trustworthy URLs from results) to gather fresh material; treat the synthesized findings as the session's "ingested content" for summary and Q&A |
+| No argument / plain text | pasted article or study notes | use the text directly |
+| Truly empty | nothing to read | ask once for a link, file, or paste (do not ask if they already gave a topic-only query above) |
 
-**Never ask the user to copy-paste content.** If you can detect a file or URL, ingest it silently.
+**Never ask the user to copy-paste content** when a URL, file, or topic-plus-web-search path exists. If you can detect a file or URL, ingest it silently.
 
 ### 2. Generate a topic title
-From the content, generate a short 4–6 word title.
+From the content (or, for a topic-only web session, from the user's query plus the main theme of the search results), generate a short 4–6 word title.
 
 ### 3. Initialize the Notion session (via MCP)
 
@@ -57,7 +59,7 @@ notion-create-pages(
 
 ### 4. Write and auto-save a summary
 
-Write a **3–5 sentence summary**: what this content is about and the key things the user will learn.
+Write a **3–5 sentence summary**: what this content is about and the key things the user will learn. For web-sourced sessions, summarize the current landscape you found (with approximate time context, e.g. "as of <search date>").
 
 Then immediately append it to the Notion page silently (no announcement) using the **Notion MCP `notion-update-page` tool**:
 
@@ -84,8 +86,7 @@ Everything is saved to Notion automatically.
 
 - **Ask anything** → I'll answer (and save it)
 - **`note: your thought`** → saves your idea
-- **`edit: keyword → new content`** → modifies a saved entry
-- **`delete: keyword`** → removes a saved entry
+- **Edit/Delete** → say "帮我改一下XXX" or "删掉那条XXX" (natural language works)
 - **`done`** → ends the session
 ---
 ```
@@ -93,6 +94,25 @@ Everything is saved to Notion automatically.
 ---
 
 ## During the session
+
+### Intent first: Notion operation vs. subject discussion
+
+Do **not** classify edit/delete from keywords alone (`删除`, `修改`, `改掉`, etc.). Decide whether the user is **directing changes to this session's Notion notes** or **discussing the learning topic** (including conceptual or comparative questions).
+
+| Strong signals for **Notion operation** | Strong signals for **discussion** (answer + optional Q&A save) |
+|---|---|
+| Points at **saved lines**: `那条`, `这条`, `刚才那条`, `页面上`, `之前保存的`, `记录` in reference to **this notes page** | **Open question**, `还是`, `应该怎么`, `好不好`, theory or design tradeoff about the *subject* |
+| Imperative tied to **their stored bullet**: "删掉**关于XXX的记录**" when XXX clearly matches an entry you saved | Same verbs but **about the material's topic**, not the note: e.g. comparing strategies in the field |
+| Explicit channel: `edit:`, `delete:` targeting content | Rhetorical or educational phrasing |
+
+**Examples**
+
+- **Operation:** "帮我删掉那条关于闭环的记录" — `那条` + `记录` targets an existing bullet.
+- **Discussion:** "agent 是应该删除旧对话还是压缩？" — asks how *agents* should behave; **not** a command to delete a Notion line.
+
+If **ambiguous**, prefer **discussion** (answer and save as `[Q&A]`) unless the user clearly anchors to **this page's entries**.
+
+---
 
 For **every user message**, determine the action:
 
@@ -121,21 +141,38 @@ Append: `- [Idea] <their thought>`
 
 Reply: "Saved ✓"
 
-### `edit: <keyword> → <new content>`
-The user wants to modify a previously saved entry.
+### Editing a saved entry
 
+**Only after** the intent check: user is operating on **Notion**, not asking a conceptual question.
+
+The user wants to modify something previously saved. They might say it in many ways — all of these should trigger an edit **when** the intent is Notion-operation:
+- `edit: 关键词 → 新内容`
+- "帮我改一下那条关于XXX的"
+- "把XXX改成YYY"
+- "修改之前说的XXX"
+- Any natural language expressing intent to change a previous entry
+
+How to handle:
 1. Use `notion-fetch` to read the current page content.
-2. Find the bullet line containing `<keyword>`. If multiple lines match, list them with numbers and ask the user to pick one.
+2. Identify which entry the user means from their message (by keyword, topic, or context). If ambiguous or multiple lines match, list them with numbers and ask the user to pick one.
 3. Replace the matched line using `notion-update-page` with `update_content`:
    - `old_str`: the full matched bullet line
-   - `new_str`: the same line with its content replaced by `<new content>` (keep the original label like `[Q&A]`, `[Idea]`, `[Summary]`)
+   - `new_str`: the same line with its content replaced by the user's new content (keep the original label like `[Q&A]`, `[Idea]`, `[Summary]`)
 4. Reply: "Updated ✓"
 
-### `delete: <keyword>`
-The user wants to remove a previously saved entry.
+### Deleting a saved entry
 
+**Only after** the intent check: user is operating on **Notion**, not discussing whether *something in the domain* should be deleted.
+
+The user wants to remove something previously saved. They might say:
+- `delete: 关键词`
+- "帮我删掉那条XXX"
+- "删除关于XXX的记录"
+- Any natural language expressing intent to remove a previous entry
+
+How to handle:
 1. Use `notion-fetch` to read the current page content.
-2. Find the bullet line containing `<keyword>`. If multiple lines match, list them with numbers and ask the user to pick one.
+2. Identify which entry the user means. If ambiguous or multiple lines match, list them with numbers and ask the user to pick one.
 3. Remove the matched line using `notion-update-page` with `update_content`:
    - `old_str`: the full matched bullet line (including the leading `\n` if not the first bullet)
    - `new_str`: `""` (empty string)
@@ -146,8 +183,10 @@ Give a short warm closing summary of what was discussed and what was saved to No
 
 ### Anything else (a question or comment)
 
-1. Answer the question, grounded in the ingested content. If the answer isn't in the content, say so honestly.
-2. **Silently and immediately** append the Q&A pair to Notion — no announcement, no asking:
+1. Answer the question, grounded in the ingested content.
+2. If the user asks for **the latest**, **today**, **recent papers**, **热点**, or comparable **time-sensitive** information and the answer is not in the original source (or there was no single source), use **WebSearch** (and **WebFetch** on selected URLs) before answering. Cite or paraphrase what you found; do not invent citations.
+3. If the answer still is not in the content or search results, say so honestly.
+4. **Silently and immediately** append the Q&A pair to Notion — no announcement, no asking:
    - Append: `- [Q&A] Q: <their question> | A: <your answer (concise version)>`
 
 Do **not** say "Saved" after Q&A — saving is invisible. The user just sees your answer.
@@ -158,7 +197,8 @@ Do **not** say "Saved" after Q&A — saving is invisible. The user just sees you
 
 - **Zero friction** — never ask the user to copy, paste, or repeat themselves
 - **Silent saving** — Q&A saves happen invisibly; only `note:` gets a confirmation
-- **Grounded** — never make things up; if it's not in the content, say so
+- **Grounded** — never make things up; if it's not in the content, say so; for recency topics, fetch with **WebSearch** / **WebFetch** first
+- **Intent before edit/delete** — operational language about the *topic* is still discussion unless anchored to **this Notion page**
 - **Concise by default** — answer directly, go deep only if asked
 - **One thing at a time** — don't dump everything at once
 
