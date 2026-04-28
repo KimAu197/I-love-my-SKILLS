@@ -91,6 +91,25 @@ Choose one of these modes:
 
 Persist the chosen strategy in `.cursor/domino-plan.md`.
 
+## Data-Centric Workflow Gate
+
+If the goal involves datasets, data filtering, generated data, model training, evaluation data, synthetic data, or end-to-end ML workflows, Domino must create and preserve a Data Validation Thread.
+
+The Data Validation Thread is mandatory when data quality could materially affect the result. It must be written into `.cursor/domino-plan.md` and carried into every relevant task spec.
+
+Include:
+
+- Target data criteria: what makes data suitable for the user's actual goal, not just available. Example: for motion deblurring, source images for synthetic blur should be sharp, diverse, and visually suitable for plausible motion degradation. Prefer images with dynamic subjects or scenes, handheld-camera contexts, textured backgrounds, and indoor/outdoor diversity. Avoid images that are already blurry, low-quality, over-compressed, mostly blank, or visually irrelevant.
+- Filtering strategy: how data will be selected, rejected, split, and counted.
+- Audit evidence: required summaries or files with source datasets, counts before and after filtering, split sizes, rejected cases, representative samples, and limitations.
+- Sample inspection: whether workers must manually or programmatically inspect samples before training or evaluation.
+- End-to-end smoke check: for training workflows, whether to run a dry run or tiny training run to verify the processed data actually works.
+- Goal alignment checkpoints: points where workers must check that the current artifact still matches the original user goal.
+- Artifact hygiene: what intermediate outputs may be kept, where final artifacts and audit evidence belong, what temporary files, partial datasets, failed-run checkpoints, or debug outputs should be removed or summarized, and when cleanup checks are triggered.
+
+Do not treat data preparation as a black box inside implementation. If a data task lacks enough criteria to decide whether the resulting dataset is suitable, use the Ambiguity Gate before execution.
+Do not allow data or training workflows to accumulate unmanaged intermediate artifacts. By default, trigger artifact hygiene checks after each meaningful data processing stage, after dry runs or tiny training runs that create disposable outputs, before task completion, and during final verification. A trigger is a decision point, not a mandatory deletion step: if no new disposable artifacts exist, cleanup would disrupt downstream work, or cleanup is unsafe, require the worker to record `not needed`, `deferred`, or the safety reason instead of deleting blindly. If cleanup could delete user-provided data or expensive outputs, preserve them and report the cleanup decision.
+
 ## Worker Roles
 
 Domino should use subagents instead of slash-command jumps.
@@ -169,7 +188,10 @@ Use these statuses in `.cursor/domino-runtime.json`:
 - Do not tell the user to manually run an old slash command as the next step.
 - Do not invent ad-hoc task files outside `.cursor/tasks/`.
 - Carry `Domino assumptions` and `User decisions` into task specs.
+- Carry the Data Validation Thread into task specs whenever data quality affects the outcome.
 - Require worker results to include `Constraint check`.
+- Require worker results for data-dependent tasks to include `Data validation`, with evidence from counts, filters, samples, and smoke checks when applicable.
+- Require worker results for data or training tasks to include `Artifact hygiene`, with retained artifacts, cleaned artifacts, and any cleanup deliberately skipped.
 - Re-read `.cursor/domino-plan.md` and `.cursor/domino-runtime.json` on every continuation turn.
 - If blocked, stop and ask exactly one high-impact question.
 

@@ -35,12 +35,17 @@ One sentence: what should be true when this task is done?
 - Dependencies: [task IDs, or "none"]
 - Domino assumptions: [list active assumptions, or "none"]
 - User decisions: [list binding answers, or "none"]
+- Data Validation Thread: [target criteria, audit evidence, sample checks, smoke test, or "not applicable"]
+- Artifact hygiene: [allowed retained artifacts, cleanup expectations, final artifact locations, or "not applicable"]
+- Artifact hygiene triggers: [after meaningful data stage, after smoke/tiny train if disposable outputs are created, before task completion, final verify, or task-specific triggers; allow not-needed/deferred decisions]
 
 ## Instructions
 Precise, step-by-step instructions.
 
 ## Acceptance Criteria
 - [ ] [specific, checkable condition]
+- [ ] [for data-dependent tasks: data criteria, audit evidence, sample checks, and smoke test expectations are satisfied]
+- [ ] [for data or training tasks: unnecessary intermediate artifacts are cleaned or organized, with retained artifacts documented]
 
 ## Output
 - Modified files: [list]
@@ -57,6 +62,9 @@ Required output:
 
 - Write standard task specs to `.cursor/tasks/`
 - Keep assumptions and user decisions explicit
+- For data-dependent work, define concrete data selection criteria, audit artifacts, sample checks, and end-to-end smoke checks before implementation begins
+- For data or training work, define artifact hygiene expectations so intermediate files do not accumulate silently
+- Define artifact hygiene triggers explicitly; default to after each meaningful data processing stage, after dry runs or tiny training runs that create disposable outputs, before task completion, and final verification. Triggers are decision points, not mandatory deletion steps.
 - Do not ask the user to manually trigger a worker if Domino can dispatch it next
 
 ### ParallelPlanner
@@ -69,6 +77,8 @@ Required output:
 - Write `.cursor/parallel-plan.md`
 - Only parallelize work with explicit interface clarity
 - Carry assumptions and user decisions into both task specs and wave plan
+- Do not parallelize data production and data validation unless artifacts and handoff points are explicit
+- Do not parallelize cleanup-sensitive tasks unless artifact ownership and final handoff paths are explicit
 
 ### Executor
 
@@ -78,9 +88,13 @@ Use this contract:
 2. Read `Domino assumptions` and `User decisions`.
 3. Treat them as binding execution constraints.
 4. Stay in scope.
-5. Write a result section including:
+5. For data-dependent tasks, inspect the data artifact itself: counts, filters, splits, representative samples, and dry-run or tiny-train logs when requested.
+6. For data or training tasks, trigger artifact hygiene checks after meaningful data stages, after smoke or tiny training runs that create disposable outputs, and before completion. Clean or organize unnecessary intermediate artifacts without deleting user-provided data or expensive outputs unless explicitly safe; record `not needed` or `deferred` when cleanup is unnecessary or unsafe.
+7. Write a result section including:
    - `Files changed`
    - `Acceptance criteria`
+   - `Data validation` when applicable
+   - `Artifact hygiene` when applicable
    - `Constraint check`
 
 ### Debugger
@@ -90,10 +104,14 @@ Use this contract:
 1. Diagnose before fixing.
 2. Read `Domino assumptions` and `User decisions`.
 3. Do not apply a fix that violates those constraints.
-4. Write a result section including:
+4. For data-dependent failures, check whether unsuitable data criteria, filtering, splits, generated data, missing audit evidence, sample quality, or skipped smoke tests caused the issue.
+5. For data or training fixes, trigger artifact hygiene after reproducing/fixing the run if disposable outputs were created and before completion. Check whether the repair left behind unnecessary temporary files, failed-run checkpoints, partial generated outputs, or duplicated logs; record `not needed` or `deferred` when cleanup is unnecessary or unsafe.
+6. Write a result section including:
    - `Root cause`
    - `Fix applied`
    - `Verification`
+   - `Data validation` when applicable
+   - `Artifact hygiene` when applicable
    - `Constraint check`
 
 ### Reviewer
@@ -104,9 +122,13 @@ Use this contract:
 2. Read actual files, not just the reported summary.
 3. Check acceptance criteria explicitly.
 4. Check whether `Domino assumptions` and `User decisions` were satisfied.
-5. Write a result section including:
+5. For data-dependent tasks, review the data audit evidence, representative samples, split logic, and smoke-test logs against the target criteria.
+6. For data or training tasks, review whether artifact hygiene decisions happened at the required triggers and whether intermediate artifacts were cleaned, organized, intentionally retained, marked not needed, or deferred.
+7. Write a result section including:
    - `Verdict`
    - `Criteria review`
+   - `Data validation review` when applicable
+   - `Artifact hygiene review` when applicable
    - `Additional findings`
    - `Constraint check`
 
@@ -117,8 +139,10 @@ Use this contract:
 1. Re-read the actual changed files.
 2. Compare them to the goal and plan.
 3. Check for correctness, completeness, references, and consistency.
-4. If there are issues, create repair follow-up work through the Planner role.
-5. If everything passes, report clearly that verification passed.
+4. For data-dependent work, verify that data processing served the target goal, not just that files exist. Review audit artifacts, sample evidence, and dry-run or tiny-train outputs when present.
+5. For data or training work, verify that artifact hygiene decisions happened at the required triggers, unnecessary intermediate artifacts are cleaned or organized, and retained, not-needed, or deferred artifacts are intentional.
+6. If there are issues, create repair follow-up work through the Planner role.
+7. If everything passes, report clearly that verification passed.
 
 ### MemorySaver
 
