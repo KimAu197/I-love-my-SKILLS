@@ -70,7 +70,7 @@ cd domino
 
 After syncing, restart or reload Cursor so the skill and hooks are available.
 
-Use it by asking Cursor to use the `domino` skill for a multi-step task. Domino manages the old slash-command chain internally; users should not need to manually run `/orchestrator`, `/agent-executor`, `/verify`, or related legacy commands.
+Use it by asking Cursor to use the `domino` skill for a multi-step task. Domino coordinates planning, workers, verification, and memory through one workflow — you do not need separate commands for each phase.
 
 ---
 
