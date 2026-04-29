@@ -6,6 +6,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 
 RUNTIME_VERSION = 1
@@ -43,6 +44,8 @@ def default_state() -> dict:
         "last_modified_files": [],
         "last_subagent_generation_id": None,
         "last_stop_generation_id": None,
+        "last_dispatch_at_ms": None,
+        "current_phase": None,
         "started_at_ms": None,
         "updated_at_ms": None,
     }
@@ -99,6 +102,7 @@ def mark_dispatch(workspace: Path, role: str, task_id: str) -> dict:
     state = load_state(workspace)
     if not state.get("active"):
         state = start_state(workspace)
+    ts = now_ms()
     state.update(
         {
             "active": True,
@@ -108,6 +112,7 @@ def mark_dispatch(workspace: Path, role: str, task_id: str) -> dict:
             "last_worker_status": None,
             "last_worker_summary": None,
             "last_modified_files": [],
+            "last_dispatch_at_ms": ts,
         }
     )
     save_state(workspace, state)
@@ -127,6 +132,17 @@ def complete_state(workspace: Path) -> dict:
     state = load_state(workspace)
     state["active"] = False
     state["workflow_status"] = "completed"
+    state["current_phase"] = None
+    save_state(workspace, state)
+    return state
+
+
+def set_current_phase(workspace: Path, phase: Optional[str]) -> dict:
+    """Persist a human-readable phase label for hooks and continuations (mirror ``## Phases`` in the plan)."""
+    state = load_state(workspace)
+    if not state.get("active"):
+        state = start_state(workspace)
+    state["current_phase"] = phase
     save_state(workspace, state)
     return state
 
@@ -154,6 +170,43 @@ def parse_task(path: Path) -> dict:
         "status": status_match.group(1) if status_match else None,
         "assigned_to": assigned_match.group(1) if assigned_match else None,
     }
+
+
+def check_stuck(workspace: Path, minutes: float) -> dict:
+    """Detect workflows stuck in waiting_for_worker longer than ``minutes``."""
+    state = load_state(workspace)
+    out: dict = {
+        "active": bool(state.get("active")),
+        "workflow_status": state.get("workflow_status"),
+        "stuck": False,
+        "reason": None,
+        "last_dispatch_at_ms": state.get("last_dispatch_at_ms"),
+        "elapsed_ms": None,
+        "threshold_ms": None,
+        "minutes": minutes,
+    }
+    if not state.get("active"):
+        out["reason"] = "inactive"
+        return out
+    if state.get("workflow_status") != "waiting_for_worker":
+        out["reason"] = "not_waiting_for_worker"
+        return out
+    last_ms = state.get("last_dispatch_at_ms")
+    if not last_ms:
+        out["reason"] = "no_dispatch_timestamp"
+        return out
+    threshold_ms = int(minutes * 60 * 1000)
+    elapsed = now_ms() - int(last_ms)
+    out["elapsed_ms"] = elapsed
+    out["threshold_ms"] = threshold_ms
+    if elapsed > threshold_ms:
+        out["stuck"] = True
+        out["reason"] = "waiting_for_worker_timeout"
+        out["last_task_id"] = state.get("last_task_id")
+        out["last_worker_role"] = state.get("last_worker_role")
+    else:
+        out["reason"] = "within_threshold"
+    return out
 
 
 def normalize_result(workspace: Path, task_id: str) -> dict:
@@ -204,6 +257,22 @@ def main() -> int:
 
     read_state_parser = subparsers.add_parser("read-state")
     read_state_parser.add_argument("--workspace", required=True)
+    read_state_parser.add_argument(
+        "--stuck-after-minutes",
+        type=float,
+        default=None,
+        metavar="M",
+        help="If set, include stuck detection when workflow is waiting_for_worker.",
+    )
+
+    stuck_parser = subparsers.add_parser("check-stuck")
+    stuck_parser.add_argument("--workspace", required=True)
+    stuck_parser.add_argument(
+        "--minutes",
+        type=float,
+        default=30.0,
+        help="Consider stuck if waiting_for_worker exceeds this many minutes (default: 30).",
+    )
 
     dispatch_parser = subparsers.add_parser("mark-dispatch")
     dispatch_parser.add_argument("--workspace", required=True)
@@ -213,6 +282,20 @@ def main() -> int:
     set_status_parser = subparsers.add_parser("set-status")
     set_status_parser.add_argument("--workspace", required=True)
     set_status_parser.add_argument("--status", required=True)
+
+    phase_parser = subparsers.add_parser("set-current-phase")
+    phase_parser.add_argument("--workspace", required=True)
+    phase_mx = phase_parser.add_mutually_exclusive_group(required=True)
+    phase_mx.add_argument(
+        "--phase",
+        metavar="LABEL",
+        help='Short label for the active phase (e.g. "Phase 2 — Parallel experiments").',
+    )
+    phase_mx.add_argument(
+        "--clear",
+        action="store_true",
+        help="Clear current_phase in runtime (plan file remains authoritative).",
+    )
 
     complete_parser = subparsers.add_parser("complete")
     complete_parser.add_argument("--workspace", required=True)
@@ -237,7 +320,15 @@ def main() -> int:
         return 0
 
     if args.command == "read-state":
-        print_json(load_state(workspace))
+        state = load_state(workspace)
+        payload = dict(state)
+        if args.stuck_after_minutes is not None:
+            payload["stuck_check"] = check_stuck(workspace, float(args.stuck_after_minutes))
+        print_json(payload)
+        return 0
+
+    if args.command == "check-stuck":
+        print_json(check_stuck(workspace, float(args.minutes)))
         return 0
 
     if args.command == "mark-dispatch":
@@ -246,6 +337,11 @@ def main() -> int:
 
     if args.command == "set-status":
         print_json(set_status(workspace, args.status))
+        return 0
+
+    if args.command == "set-current-phase":
+        phase_val = None if getattr(args, "clear", False) else getattr(args, "phase", None)
+        print_json(set_current_phase(workspace, phase_val))
         return 0
 
     if args.command == "complete":

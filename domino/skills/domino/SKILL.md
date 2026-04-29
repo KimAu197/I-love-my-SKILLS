@@ -32,8 +32,12 @@ Use these deterministic helpers:
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py ensure --workspace "<workspace-root>"`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py start --workspace "<workspace-root>"`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py read-state --workspace "<workspace-root>"`
+- `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py read-state --workspace "<workspace-root>" --stuck-after-minutes 30`
+- `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py check-stuck --workspace "<workspace-root>" --minutes 30`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py mark-dispatch --workspace "<workspace-root>" --role "<role>" --task-id "<task-id>"`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py set-status --workspace "<workspace-root>" --status "<status>"`
+- `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py set-current-phase --workspace "<workspace-root>" --phase "<short phase label>"`
+- `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py set-current-phase --workspace "<workspace-root>" --clear`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py complete --workspace "<workspace-root>"`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py next-task --workspace "<workspace-root>"`
 - `python3 ~/.cursor/skills/domino/scripts/domino_runtime.py normalize-result --workspace "<workspace-root>" --task-id "<task-id>"`
@@ -49,8 +53,17 @@ At the start of every Domino run:
 3. Read `.cursor/project_state.md`, `.cursor/context_summary.md`, and `.cursor/project-skills-memory.md` if they exist.
 4. Read `.cursor/domino-runtime.json` and `.cursor/domino-plan.md` if they exist.
 5. If there is no active Domino runtime state, run `start`.
+6. If runtime is active and `workflow_status` is `waiting_for_worker`, run `read-state` with `--stuck-after-minutes` (for example `30`) or run `check-stuck`. If `stuck_check.stuck` is true, treat the workflow as stalled: read `last_task_id`, inspect `.cursor/tasks/<task-id>.md`, and recover (for example dispatch Debugger, cancel and replan, or manually unblock the worker).
 
 If `.cursor/cursor-skills-memory-candidates.md` exists, read it as advisory context only. It contains global memory candidates, not necessarily approved global rules.
+
+### Hook loop budget
+
+User-level `subagentStop` and `stop` hooks each have a `loop_limit` (installed Domino hooks use a raised default). One continuation cycle can consume multiple hook-triggered turns when many workers complete plus verify and memory-save phases. For large plans (many tasks), raise `loop_limit` in hooks configuration if continuations stop early, or split work across sessions.
+
+### Worker results vs chat summaries
+
+Hooks may reference a task id and paths only. Large outputs must live under `## Result` in `.cursor/tasks/task-*.md`. On every continuation after a worker, read that section from disk; do not assume the chat summary is complete.
 
 ## Ambiguity Gate
 
@@ -72,15 +85,32 @@ Do not ask more than one high-impact question at a time.
 
 ## Strategy
 
-Choose one of these modes:
+Choose one of these top-level workflow modes:
 
-- `Sequential`
-- `Parallel`
-- `Repair`
-- `Review-only`
-- `Hybrid`
+- `Sequential` — single-threaded task queue; use when the project is purely linear or you have not yet reached a parallel segment.
+- `Parallel` — concurrent wave work; use when the whole active segment is parallel-only.
+- `Repair` — fix/review loop after failures or review feedback.
+- `Review-only` — audit without new implementation.
+- `Hybrid` — project mixes segments with different execution shapes (for example serial scaffold then parallel experiments).
 
-Persist the chosen strategy in `.cursor/domino-plan.md`.
+### Plan file shape (living plan)
+
+The plan is not frozen on day one. Every continuation re-reads `.cursor/domino-plan.md` and may update it when scope or phase changes.
+
+Persist the top-level mode under `## Chosen Strategy` in `.cursor/domino-plan.md`.
+
+For **`Hybrid`**, the following is mandatory:
+
+- `## Chosen Strategy` must be exactly **`Hybrid`**. Do not put a single segment name (such as `Sequential` or `Parallel`) in `## Chosen Strategy` when the project is multi-phase.
+- Add **`## Phases`**. For each phase, state: a short name, the segment strategy (`Sequential` | `Parallel` | `Repair` | `Review-only` as appropriate), dependencies on prior phases or artifacts, and exit conditions (what must be true before moving on).
+- When a phase uses parallel waves, point to **`.cursor/parallel-plan.md`** for wave details and keep `## Phases` as the high-level index.
+
+Optional but recommended: keep runtime aligned with the active segment by setting `current_phase` in `.cursor/domino-runtime.json` whenever the active phase changes (use `set-current-phase`). Hooks append this label to automatic continuations so the orchestrator sees which phase is live without re-deriving it from the plan alone.
+
+### Living strategy vs runtime mirror
+
+- **Authoritative narrative**: `.cursor/domino-plan.md` (`## Chosen Strategy`, `## Phases`).
+- **Shortcut for hooks**: `current_phase` string in `.cursor/domino-runtime.json` for continuation prompts; update it when Domino enters a new phase (for example after Planner or ParallelPlanner publishes the next segment).
 
 ## Data-Centric Workflow Gate
 
@@ -141,8 +171,8 @@ Domino should use subagents and internal role prompts.
 
 Use these internal roles:
 
-- `Planner` — produces standard task specs for sequential, repair, or review-only work
-- `ParallelPlanner` — produces standard task specs for parallel waves
+- `Planner` — produces standard task specs for sequential, repair, review-only, or **Hybrid serial segments**; must align task batches with `## Phases` when strategy is Hybrid
+- `ParallelPlanner` — produces standard task specs and `.cursor/parallel-plan.md` for parallel **waves** (Hybrid parallel phases or fully Parallel runs)
 - `Executor` — implements one task spec
 - `Debugger` — fixes one task spec
 - `Reviewer` — reviews one task spec
@@ -167,14 +197,27 @@ python3 ~/.cursor/skills/domino/scripts/domino_runtime.py mark-dispatch --worksp
 5. Let the `subagentStop` hook auto-submit the next Domino continuation.
 6. After the queue is complete, set status to `verify_pending` and allow the `stop` hook to continue the flow.
 
-### Parallel, Hybrid
+### Parallel wave execution
+
+Use whenever the active segment is wave-based (either the whole workflow uses `## Chosen Strategy` **`Parallel`**, or a **Hybrid** phase is parallel):
 
 1. Dispatch the `ParallelPlanner` role to write `.cursor/tasks/task-*.md` and `.cursor/parallel-plan.md`.
 2. If isolation is required, prefer isolated worker subagents or best-of-n-style isolated runners for each wave task.
 3. Before dispatching each worker subagent, run `mark-dispatch`.
-4. Let the `subagentStop` hook auto-submit the next Domino continuation.
+4. Let the `subagentStop` hook auto-submit the next Domino continuation (follow-ups include `current_phase` when set).
 5. If a wave needs merge-style reconciliation, have Domino do that work inside the main loop using `.cursor/parallel-plan.md` and task results.
-6. When the final active segment is done, set status to `verify_pending`.
+6. When the segment's planned tasks for that wave are done, either proceed to the next phase (Hybrid) or set status to `verify_pending` (if nothing remains).
+
+### Hybrid
+
+1. Maintain **`## Phases`** in `.cursor/domino-plan.md` with **`## Chosen Strategy` set to `Hybrid`** (see Strategy section).
+2. For each **serial** phase, use **`Planner`** until that phase's exit conditions are met.
+3. When entering a **parallel** phase, run **`set-current-phase`** with a label matching that phase in `## Phases`, then follow **Parallel wave execution**.
+4. Repeat serial and parallel segments per `## Phases` until the roadmap is complete, then set status to `verify_pending`.
+
+### Parallel (standalone)
+
+When the entire scope is wave-based, set **`## Chosen Strategy`** to **`Parallel`** and follow **Parallel wave execution** only.
 
 ## Verify And Memory Save
 
@@ -219,8 +262,12 @@ Each memory item must be short and executable:
 
 Domino relies on user-level hooks:
 
-- `subagentStop` continues the workflow after worker completion
+- `subagentStop` continues the workflow after worker completion (success or failure)
 - `stop` continues the workflow for verify and memory-save phases
+
+When a worker finishes with a non-`completed` status, `subagentStop` sets `workflow_status` back to `running`, records `last_worker_status`, and submits a continuation that instructs Domino to involve Debugger or repair planning. When a worker succeeds, the continuation points at `.cursor/tasks/<task-id>.md` and `## Result`, not an embedded summary.
+
+Automatic continuations from `subagentStop` and `stop` append the **`current_phase`** string when it is set in runtime so the orchestrator knows which segment is active.
 
 Do not ask the user to manually continue the chain unless execution is blocked.
 
@@ -235,8 +282,11 @@ Use these statuses in `.cursor/domino-runtime.json`:
 - `blocked`
 - `completed`
 
+Also use optional field **`current_phase`**: a short human-readable label mirrored from `## Phases` (not a second source of truth). Update with `set-current-phase` when the active phase changes; cleared on `complete`.
+
 ## Non-Negotiable Rules
 
+- If strategy **`Hybrid`**, `## Chosen Strategy` must be **`Hybrid`** and **`## Phases`** must exist with per-phase strategy type, dependencies, and exit conditions. Do not encode the global workflow as a single segment name (such as `Sequential` only) when multiple phases apply.
 - Do not ask the user to manually run internal workflow roles as separate steps.
 - Do not invent ad-hoc task files outside `.cursor/tasks/`.
 - Carry `Domino assumptions` and `User decisions` into task specs.

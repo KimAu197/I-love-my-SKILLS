@@ -59,7 +59,7 @@ Precise, step-by-step instructions.
 
 ### Planner
 
-Use for sequential, repair, and review-only segments.
+Use for sequential, repair, review-only segments, and for **serial phases** inside **Hybrid** workflows.
 
 Required output:
 
@@ -72,6 +72,7 @@ Required output:
 - For experiments, training, evaluation, benchmarks, or research runs, require resource checks before launch and once during execution, with recommended parameters recorded before running.
 - For any run that can produce checkpoints, logs, outputs, predictions, or metrics, require incomplete-run cleanup instructions: if the run stops early, move run artifacts to `incomplete/{timestamp}_{run_name}/`, do not delete them, do not leave them in place, and print one terminal summary line.
 - Do not ask the user to manually trigger a worker if Domino can dispatch it next
+- When `.cursor/domino-plan.md` uses **`## Chosen Strategy` `Hybrid`**, ensure **`## Phases`** exists and keep each Planner batch aligned with the current serial phase until its exit conditions are met.
 
 ### ParallelPlanner
 
@@ -197,23 +198,35 @@ Expected fields:
   "version": 1,
   "active": true,
   "workflow_status": "running",
+  "current_phase": null,
   "last_worker_role": null,
   "last_task_id": null,
+  "last_worker_status": null,
+  "last_worker_summary": null,
+  "last_dispatch_at_ms": null,
   "last_subagent_generation_id": null,
   "last_stop_generation_id": null
 }
 ```
 
+`current_phase` is an optional short string mirrored from `## Phases` in the plan (same conceptual phase, not a separate source of truth). Update via `set-current-phase`; cleared on `complete`. Hooks append it to automatic continuation messages.
+
+`last_dispatch_at_ms` is set when `mark-dispatch` runs (worker handoff). It supports `check-stuck` / `read-state --stuck-after-minutes` when the workflow stays in `waiting_for_worker` too long. Older workspaces may lack this field until the next dispatch.
+
+`last_worker_summary` is a pointer string after success when `last_task_id` is set, not a copy of large results; authoritative output is under `## Result` in the task file.
+
 ## Hook Behavior
 
 ### subagentStop
 
-Trigger a follow-up only when:
+Process once per stop event when generation id has not already been processed:
 
 - the runtime state is active
 - `workflow_status` is `waiting_for_worker`
-- the subagent status is `completed`
-- the generation id has not already been processed
+
+If the subagent status is not `completed`, set `workflow_status` to `running`, record `last_worker_status`, and emit a follow-up aimed at Debugger or repair planning.
+
+If the subagent status is `completed`, set `workflow_status` to `running` and emit a follow-up that points at `.cursor/tasks/<task-id>.md` and `## Result` (no large embedded summary). Continuation text includes `current_phase` when set.
 
 ### stop
 
@@ -223,6 +236,8 @@ Trigger a follow-up only when:
 - `workflow_status` is `verify_pending` or `memory_save_pending`
 - the stop event status is `completed`
 - the generation id has not already been processed
+
+Continuation text includes `current_phase` when set.
 
 ## Parallel Note
 

@@ -9,6 +9,13 @@ sys.path.insert(0, str(Path.home() / ".cursor" / "skills" / "domino" / "scripts"
 from domino_runtime import load_state, save_state, workspace_path  # noqa: E402
 
 
+def phase_suffix(state: dict) -> str:
+    label = state.get("current_phase")
+    if not label:
+        return ""
+    return f"\n\nCurrent phase (runtime `current_phase`): {label}"
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -46,14 +53,18 @@ def main() -> int:
     workflow_status = state.get("workflow_status")
     if workflow_status == "verify_pending":
         followup = (
-            "/domino Continue the active Domino workflow and run final verification now. "
-            "Read `.cursor/domino-plan.md`, `.cursor/domino-runtime.json`, and the latest task results before acting."
+            "Continue the active Domino workflow and run final verification now. "
+            "Read `.cursor/domino-plan.md`, `.cursor/domino-runtime.json`, and task files under `.cursor/tasks/` "
+            "(especially each `## Result`) before acting."
         )
     elif workflow_status == "memory_save_pending":
         followup = (
-            "/domino Continue the active Domino workflow and persist memory now. "
+            "Continue the active Domino workflow and persist memory now. "
             "Write `.cursor/project_state.md` and `.cursor/context_summary.md`, then mark the workflow complete."
         )
+
+    if followup:
+        followup += phase_suffix(state)
 
     if not followup:
         print(json.dumps({}))
