@@ -64,13 +64,24 @@ It installs:
 - Hook entries in `~/.cursor/hooks.json`
 
 ```bash
-cd domino
+cd skills/domino
 ./sync.sh
 ```
 
 After syncing, restart or reload Cursor so the skill and hooks are available.
 
 Use it by asking Cursor to use the `domino` skill for a multi-step task. Domino coordinates planning, workers, verification, and memory through one workflow — you do not need separate commands for each phase.
+
+**Recent behavior and documentation updates:**
+
+- **Hooks:** Raised default `loop_limit` on Domino hook entries so long runs (many tasks plus verify and memory-save phases) are less likely to stop mid-chain; SKILL explains when to raise further or split sessions.
+- **Worker results:** Continuations point at `.cursor/tasks/task-*.md` and the `## Result` section as the source of truth; large summaries are not relied on from chat. Runtime stores pointer-style `last_worker_summary` when a task id exists.
+- **Worker failure:** If a subagent exits without `completed`, runtime returns to `running` and the hook submits a continuation aimed at Debugger or repair planning (not a silent stall).
+- **Stuck detection:** `last_dispatch_at_ms` on dispatch; `domino_runtime.py check-stuck` and `read-state --stuck-after-minutes` detect workflows stuck in `waiting_for_worker`.
+- **Hybrid workflows:** For mixed serial-then-parallel work, `domino-plan.md` uses `## Chosen Strategy` = `Hybrid` and mandatory `## Phases` (per-phase strategy, dependencies, exit conditions); parallel segments use `parallel-plan.md` and the **Parallel wave execution** rules in the skill.
+- **Current phase:** Optional `current_phase` in `domino-runtime.json`, set with `set-current-phase`; subagent and stop hook continuations append the active phase label when set so orchestration knows which segment is live.
+
+Runtime helpers include `ensure`, `start`, `read-state`, `mark-dispatch`, `set-status`, `set-current-phase`, `check-stuck`, `complete`, `next-task`, and `normalize-result`. Full contracts are in [SKILL.md](./domino/skills/domino/SKILL.md) and [reference.md](./domino/skills/domino/reference.md).
 
 ---
 
@@ -87,7 +98,7 @@ Download the `.skill` file from [Releases](../../releases) and drag it into your
 **Cursor Domino:**
 ```bash
 git clone https://github.com/KimAu197/I-love-my-SKILLS.git
-cd I-love-my-SKILLS/domino
+cd I-love-my-SKILLS/skills/domino
 ./sync.sh
 ```
 
@@ -111,16 +122,16 @@ Typical workflow:
 
 ```bash
 git pull
-cd domino
+cd skills/domino
 ./sync.sh
 
-# edit files under domino/
+# edit files under skills/domino/
 ./sync.sh
 # test in Cursor
 
-cd ..
+cd ../..
 git status
-git add domino README.md
+git add skills/domino skills/README.md
 git commit -m "fix: Improve Domino workflow behavior"
 git push
 ```
